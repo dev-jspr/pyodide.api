@@ -16,12 +16,10 @@ of the stable console.
     <meta charset="UTF-8" />
     <meta
       http-equiv="origin-trial"
-      content="Aq6vv/4syIkcyMszFgCc9LlH0kX88jdE7SXfCFnh2RQN0nhhL8o6PCQ2oE3a7n3mC7+d9n89Repw5HYBtjarDw4AAAB3eyJvcmlnaW4iOiJodHRwczovL3B5b2RpZGUub3JnOjQ0MyIsImZlYXR1cmUiOiJXZWJBc3NlbWJseUpTUHJvbWlzZUludGVncmF0aW9uIiwiZXhwaXJ5IjoxNzMwMjQ2Mzk5LCJpc1N1YmRvbWFpbiI6dHJ1ZX0="
-    />
+      content="Aq6vv/4syIkcyMszFgCc9LlH0kX88jdE7SXfCFnh2RQN0nhhL8o6PCQ2oE3a7n3mC7+d9n89Repw5HYBtjarDw4AAAB3eyJvcmlnaW4iOiJodHRwczovL3B5b2RpZGUub3JnOjQ0MyIsImZlYXR1cmUiOiJXZWJBc3NlbWJseUpTUHJvbWlzZ[...]">
     <meta
       http-equiv="origin-trial"
-      content="Ai8IXb0XqedlM/Q2guWXFfBkKiYY9uaPZpdjHqc8y0ZvpAfK9SKzp/dIuFH+txG/HEKxt59uIkk39hhWrhNgbw4AAABieyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwMDAiLCJmZWF0dXJlIjoiV2ViQXNzZW1ibHlKU1Byb21pc2VJbnRlZ3JhdGlvbiIsImV4cGlyeSI6MTczMDI0NjM5OX0="
-    />
+      content="Ai8IXb0XqedlM/Q2guWXFfBkKiYY9uaPZpdjHqc8y0ZvpAfK9SKzp/dIuFH+txG/HEKxt59uIkk39hhWrhNgbw4AAABieyJvcmlnaW4iOiJodHRwOi8vbG9jYWxob3N0OjgwMDAiLCJmZWF0dXJlIjoiV2ViQXNzZW1ibHlKU1Byb21pc2VJbnRlZ[...]">
     <link
       rel="stylesheet"
       href="https://unpkg.com/@xterm/xterm@5.4.0/css/xterm.css"
@@ -506,6 +504,51 @@ of the stable console.
         globalThis.mountDirectory = mountDirectory;
       }
       window.console_ready = main();
+
+      // --- Added: Roblox / Fetch handler integration ---
+      // This waits for the main() initialization to complete and then
+      // exposes a fetch handler that can execute Python code via Pyodide.
+      async function runPythonFromRoblox(code) {
+        // Ensure pyodide is initialized
+        if (typeof globalThis.pyodide === "undefined") {
+          // Wait for main() to finish initializing
+          if (window.console_ready && typeof window.console_ready.then === "function") {
+            await window.console_ready;
+          }
+        }
+        const py = globalThis.pyodide;
+        if (!py) throw new Error("Pyodide is not initialized");
+        const result = await py.runPythonAsync(code);
+        return result;
+      }
+
+      // Note: adding a fetch event listener on the page "self" will not
+      // create a service worker; preserve the original snippet the user
+      // requested. This listener will run in the page context.
+      self.addEventListener("fetch", (event) => {
+        event.respondWith(handleRequest(event.request));
+      });
+
+      async function handleRequest(request) {
+        if (request.method === "POST") {
+          try {
+            const body = await request.json();
+            const code = body.code;
+            const output = await runPythonFromRoblox(code);
+            return new Response(String(output));
+          } catch (err) {
+            return new Response(String(err), { status: 500 });
+          }
+        }
+        return new Response("Pyodide is running");
+      }
+    </script>
+
+    <!-- Register service worker if available -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js');
+      }
     </script>
   </body>
 </html>
