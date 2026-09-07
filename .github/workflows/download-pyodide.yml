@@ -11,7 +11,7 @@ jobs:
   download-pyodide:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: 0.23.4
+      RELEASE_TAG: 0.18.1
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -19,54 +19,26 @@ jobs:
           # ensure the action keeps GITHUB_TOKEN credentials so git push can authenticate
           persist-credentials: true
 
-      - name: Download Pyodide (release tarball candidates)
+      - name: Download Pyodide from CDN
         run: |
           set -euo pipefail
 
-          RELEASE_TAG="${RELEASE_TAG:-0.23.4}"
-          TARBALL_CANDIDATES=( "pyodide-${RELEASE_TAG}.tar.bz2" "pyodide-v${RELEASE_TAG}.tar.bz2" )
-          GH_BASE="https://github.com/pyodide/pyodide/releases/download/${RELEASE_TAG}"
+          RELEASE_TAG="${RELEASE_TAG:-0.18.1}"
           CDN_BASE="https://cdn.jsdelivr.net/pyodide/v${RELEASE_TAG}/full"
-          FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
+          # Updated file list for v0.18.1 with correct names
+          FILES=(pyodide.js pyodide.asm.js pyodide.asm.data pyodide_py.tar packages.json)
 
-          echo "Trying GitHub release tarball(s)..."
-          for t in "${TARBALL_CANDIDATES[@]}"; do
-            GH_URL="${GH_BASE}/${t}"
-            echo "Attempting: $GH_URL"
-            if curl -fSL "$GH_URL" -o "$t"; then
-              TARBALL="$t"
-              echo "Downloaded $t"
-              break
+          echo "Downloading files from CDN: $CDN_BASE"
+          for f in "${FILES[@]}"; do
+            echo "Downloading $f from CDN..."
+            if curl -L --fail "$CDN_BASE/$f" -o "$f"; then
+              echo "✓ Successfully downloaded $f"
+            else
+              echo "✗ Failed to download $f (it may not exist in this release)"
             fi
           done
 
-          if [ -n "${TARBALL:-}" ]; then
-            echo "Extracting $TARBALL..."
-            mkdir -p pyodide-extract
-            tar -xjf "$TARBALL" -C pyodide-extract
-
-            # Debug: show a sample of extracted tree
-            echo "Extracted tree (first 300 lines):"
-            find pyodide-extract -maxdepth 6 -print | sed -n '1,300p' || true
-
-            # For each expected file, search anywhere under pyodide-extract and copy the first match
-            for f in "${FILES[@]}"; do
-              src=$(find pyodide-extract -type f -name "$f" -print -quit || true)
-              if [ -n "$src" ]; then
-                echo "Found $f at $src — copying to repo root"
-                cp "$src" .
-              else
-                echo "Warning: $f not found under pyodide-extract"
-              fi
-            done
-          else
-            echo "Release tarball not available on GitHub; falling back to CDN: $CDN_BASE"
-            for f in "${FILES[@]}"; do
-              echo "Downloading $f from CDN..."
-              curl -L --fail "$CDN_BASE/$f" -o "$f"
-            done
-          fi
-
+          echo ""
           echo "Downloaded file stat (if present):"
           for f in "${FILES[@]}"; do
             if [ -f "$f" ]; then
@@ -85,8 +57,8 @@ jobs:
           git status --porcelain --untracked-files=all || true
           echo "Untracked files (git ls-files --others):"
           git ls-files --others --exclude-standard || true
-          echo "List repo root (first 200 lines):"
-          ls -lah | sed -n '1,200p' || true
+          echo "List repo root (first 50 lines):"
+          ls -lah | sed -n '1,50p' || true
           echo ".gitignore (if present):"
           [ -f .gitignore ] && sed -n '1,200p' .gitignore || echo ".gitignore not present"
 
@@ -94,7 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           MAX_BYTES=95000000   # 95 MB safety threshold (GitHub rejects >100MB)
-          FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
+          FILES=(pyodide.js pyodide.asm.js pyodide.asm.data pyodide_py.tar packages.json)
           # Build a list of files to add
           TO_ADD=()
           for f in "${FILES[@]}"; do
@@ -151,5 +123,5 @@ jobs:
         if: always()
         run: |
           echo "Final repo root listing:"
-          ls -lah | sed -n '1,200p' || true
+          ls -lah | sed -n '1,50p' || true
           echo "Done."
