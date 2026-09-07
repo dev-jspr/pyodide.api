@@ -1,0 +1,31 @@
+name: Download Pyodide v0.24.1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Pyodide files
+        run: |
+          set -euo pipefail
+          INDEX_URL="https://cdn.jsdelivr.net/pyodide/v0.24.1/full"
+          FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
+          for f in "${FILES[@]}"; do
+            echo "Downloading $f..."
+            curl -L --fail "$INDEX_URL/$f" -o "$f"
+            ls -lh "$f"
+          done
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyodide.js pyodide.wasm pyodide_py.tar packages.json
+          git commit -m "Add Pyodide v0.24.1 files" || echo "No changes to commit"
+          git push
