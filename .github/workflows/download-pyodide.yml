@@ -1,10 +1,69 @@
-      - name: Download Pyodide files
+name: Download Pyodide
+
+on:
+  workflow_dispatch:
+
+jobs:
+  download-pyodide:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Pyodide files (GitHub releases, fallback to CDN)
+        env:
+          RELEASE_TAG: 0.23.4
         run: |
           set -euo pipefail
-          INDEX_URL="https://cdn.jsdelivr.net/pyodide/v0.23.4/full"
+
+          RELEASE_TAG="${RELEASE_TAG}"
+          TARBALL_CANDIDATES=( "pyodide-${RELEASE_TAG}.tar.bz2" "pyodide-v${RELEASE_TAG}.tar.bz2" )
+          GH_BASE="https://github.com/pyodide/pyodide/releases/download/${RELEASE_TAG}"
+          CDN_BASE="https://cdn.jsdelivr.net/pyodide/v${RELEASE_TAG}/full"
           FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
-          for f in "${FILES[@]}"; do
-            echo "Downloading $f..."
-            curl -L --fail "$INDEX_URL/$f" -o "$f"
-            ls -lh "$f"
+
+          echo "Trying GitHub release tarball(s)..."
+          for t in "${TARBALL_CANDIDATES[@]}"; do
+            GH_URL="${GH_BASE}/${t}"
+            echo "Attempting: $GH_URL"
+            if curl -fSL "$GH_URL" -o "$t"; then
+              TARBALL="$t"
+              echo "Downloaded $t"
+              break
+            fi
           done
+
+          if [ -n "${TARBALL:-}" ]; then
+            echo "Extracting $TARBALL..."
+            mkdir -p pyodide-extract
+            tar -xjf "$TARBALL" -C pyodide-extract
+
+            # Try to find the extracted 'full' directory
+            EXTRACT_DIR=$(find pyodide-extract -type d -name 'full' -print -quit || true)
+            if [ -z "$EXTRACT_DIR" ]; then
+              EXTRACT_DIR=$(find pyodide-extract -type d -name '*full*' -print -quit || true)
+            fi
+
+            if [ -n "$EXTRACT_DIR" ]; then
+              for f in "${FILES[@]}"; do
+                if [ -f "$EXTRACT_DIR/$f" ]; then
+                  echo "Copying $f from $EXTRACT_DIR"
+                  cp "$EXTRACT_DIR/$f" .
+                else
+                  echo "Warning: $EXTRACT_DIR/$f not found in tarball"
+                fi
+              done
+            else
+              echo "Couldn't locate 'full' directory in extracted tarball; listing contents:"
+              ls -R pyodide-extract || true
+            fi
+          else
+            echo "Release tarball not available on GitHub; falling back to CDN: $CDN_BASE"
+            for f in "${FILES[@]}"; do
+              echo "Downloading $f from CDN..."
+              curl -L --fail "$CDN_BASE/$f" -o "$f"
+            done
+          fi
+
+          echo "Downloaded files:"
+          ls -lh ${FILES[*]} || true
