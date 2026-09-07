@@ -1,16 +1,23 @@
-self.addEventListener("fetch", async event => {
-    const request = event.request;
+const indexURL = "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/";
+importScripts(indexURL + "pyodide.js");
 
-    if (request.method === "POST") {
-        const body = await request.json();
-        const code = body.code;
+(async () => {
+    self.pyodide = await loadPyodide({ indexURL });
 
-        // Run Python using Pyodide inside the service worker
-        const result = await self.pyodide.runPythonAsync(code);
+    self.addEventListener("fetch", async event => {
+        const req = event.request;
 
-        event.respondWith(new Response(result));
-        return;
-    }
+        if (req.method === "POST") {
+            try {
+                const body = await req.json();
+                const result = await self.pyodide.runPythonAsync(body.code);
+                event.respondWith(new Response(String(result)));
+            } catch (err) {
+                event.respondWith(new Response(String(err), { status: 500 }));
+            }
+            return;
+        }
 
-    event.respondWith(fetch(request));
-});
+        event.respondWith(fetch(req));
+    });
+})();
