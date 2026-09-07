@@ -10,6 +10,8 @@ on:
 jobs:
   download-pyodide:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: 0.23.4
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,13 +19,11 @@ jobs:
           # ensure the action keeps GITHUB_TOKEN credentials so git push can authenticate
           persist-credentials: true
 
-      - name: Download Pyodide files (GitHub releases, fallback to CDN)
-        env:
-          RELEASE_TAG: 0.23.4
+      - name: Download Pyodide (release tarball candidates)
         run: |
           set -euo pipefail
 
-          RELEASE_TAG="${RELEASE_TAG}"
+          RELEASE_TAG="${RELEASE_TAG:-0.23.4}"
           TARBALL_CANDIDATES=( "pyodide-${RELEASE_TAG}.tar.bz2" "pyodide-v${RELEASE_TAG}.tar.bz2" )
           GH_BASE="https://github.com/pyodide/pyodide/releases/download/${RELEASE_TAG}"
           CDN_BASE="https://cdn.jsdelivr.net/pyodide/v${RELEASE_TAG}/full"
@@ -45,25 +45,20 @@ jobs:
             mkdir -p pyodide-extract
             tar -xjf "$TARBALL" -C pyodide-extract
 
-            # Try to find the extracted 'full' directory
-            EXTRACT_DIR=$(find pyodide-extract -type d -name 'full' -print -quit || true)
-            if [ -z "$EXTRACT_DIR" ]; then
-              EXTRACT_DIR=$(find pyodide-extract -type d -name '*full*' -print -quit || true)
-            fi
+            # Debug: show a sample of extracted tree
+            echo "Extracted tree (first 300 lines):"
+            find pyodide-extract -maxdepth 6 -print | sed -n '1,300p' || true
 
-            if [ -n "$EXTRACT_DIR" ]; then
-              for f in "${FILES[@]}"; do
-                if [ -f "$EXTRACT_DIR/$f" ]; then
-                  echo "Copying $f from $EXTRACT_DIR"
-                  cp "$EXTRACT_DIR/$f" .
-                else
-                  echo "Warning: $EXTRACT_DIR/$f not found in tarball"
-                fi
-              done
-            else
-              echo "Couldn't locate 'full' directory in extracted tarball; listing contents:"
-              ls -R pyodide-extract || true
-            fi
+            # For each expected file, search anywhere under pyodide-extract and copy the first match
+            for f in "${FILES[@]}"; do
+              src=$(find pyodide-extract -type f -name "$f" -print -quit || true)
+              if [ -n "$src" ]; then
+                echo "Found $f at $src — copying to repo root"
+                cp "$src" .
+              else
+                echo "Warning: $f not found under pyodide-extract"
+              fi
+            done
           else
             echo "Release tarball not available on GitHub; falling back to CDN: $CDN_BASE"
             for f in "${FILES[@]}"; do
@@ -72,26 +67,89 @@ jobs:
             done
           fi
 
-          echo "Downloaded files:"
-          ls -lh ${FILES[*]} || true
+          echo "Downloaded file stat (if present):"
+          for f in "${FILES[@]}"; do
+            if [ -f "$f" ]; then
+              echo "  $f: exists, size=$(stat -c%s "$f") bytes"
+            else
+              echo "  $f: missing"
+            fi
+          done
+
+      - name: Debug before commit
+        run: |
+          echo "Working directory: $(pwd)"
+          echo "Remote origin:"
+          git remote -v || true
+          echo "Git status (porcelain):"
+          git status --porcelain --untracked-files=all || true
+          echo "Untracked files (git ls-files --others):"
+          git ls-files --others --exclude-standard || true
+          echo "List repo root (first 200 lines):"
+          ls -lah | sed -n '1,200p' || true
+          echo ".gitignore (if present):"
+          [ -f .gitignore ] && sed -n '1,200p' .gitignore || echo ".gitignore not present"
+
+      - name: Prepare files for commit (skip very large files)
+        run: |
+          set -euo pipefail
+          MAX_BYTES=95000000   # 95 MB safety threshold (GitHub rejects >100MB)
+          FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
+          # Build a list of files to add
+          TO_ADD=()
+          for f in "${FILES[@]}"; do
+            if [ -f "$f" ]; then
+              size=$(stat -c%s "$f")
+              if [ "$size" -ge "$MAX_BYTES" ]; then
+                echo "Warning: $f is ${size} bytes and exceeds the safety threshold (${MAX_BYTES}). Skipping add. Consider Git LFS or external storage."
+              else
+                echo "Queuing $f for git add (size=${size})"
+                TO_ADD+=("$f")
+              fi
+            else
+              echo "Skipping $f: not present"
+            fi
+          done
+
+          # Expose TO_ADD to the next step via temporary file
+          if [ "${#TO_ADD[@]}" -gt 0 ]; then
+            printf "%s\n" "${TO_ADD[@]}" > files-to-add.txt
+            cat files-to-add.txt
+          else
+            echo "No files to add"
+            touch files-to-add.txt
+          fi
 
       - name: Commit and push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # Only add files that actually exist
-          FILES=(pyodide.js pyodide.wasm pyodide_py.tar packages.json)
-          for f in "${FILES[@]}"; do
-            if [ -f "$f" ]; then
-              echo "Adding $f..."
-              git add "$f"
-            else
-              echo "Warning: $f not found, skipping"
-            fi
-          done
-          
-          git commit -m "Add Pyodide files" || echo "No changes to commit"
-          git push
+
+          # Read files-to-add.txt and add existing entries
+          if [ -f files-to-add.txt ]; then
+            while IFS= read -r f || [ -n "$f" ]; do
+              if [ -n "$f" ] && [ -f "$f" ]; then
+                echo "Adding $f..."
+                git add "$f"
+              fi
+            done < files-to-add.txt
+          fi
+
+          # Commit only if there are staged changes
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add Pyodide files (RELEASE_TAG=${RELEASE_TAG})"
+            echo "Pushing commits..."
+            git push
+          fi
+
+      - name: Final listing
+        if: always()
+        run: |
+          echo "Final repo root listing:"
+          ls -lah | sed -n '1,200p' || true
+          echo "Done."
