@@ -1,4 +1,4 @@
-const indexURL = "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/";
+const indexURL = "./"; // load pyodide files from your repo root
 importScripts(indexURL + "pyodide.js");
 
 (async () => {
