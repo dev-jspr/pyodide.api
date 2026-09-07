@@ -29,4 +29,3 @@ jobs:
           git add pyodide.js pyodide.wasm pyodide_py.tar packages.json
           git commit -m "Add Pyodide v0.21.0 files" || echo "No changes to commit"
           git push
-
