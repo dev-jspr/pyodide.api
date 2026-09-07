@@ -127,6 +127,13 @@ of the stable console.
         const { loadPyodide } = await import(indexURL + "pyodide.mjs");
         const pyodide = await loadPyodide();
         globalThis.pyodide = pyodide;
+        // Expose pyodide on the global worker scope as requested (sets self.pyodide)
+        try {
+          self.pyodide = pyodide;
+        } catch (e) {
+          // If assignment to self fails (shouldn't in browsers), ignore silently
+          console.warn('Could not set self.pyodide:', e);
+        }
 
         // Hide loading spinner
         document.getElementById("loading").style.display = "none";
