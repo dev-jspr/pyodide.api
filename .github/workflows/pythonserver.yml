@@ -1,36 +1,16 @@
-name: Python API Server
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-jobs:
-  run-api-server:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install flask flask-cors pyngrok
-      
       - name: Create Flask API Server with ngrok
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
           cat > api_server.py << 'EOF'
           from flask import Flask, request, jsonify
           from flask_cors import CORS
           from pyngrok import ngrok
+          import os
           import time
+          
+          # Set ngrok auth token
+          ngrok.set_auth_token(os.getenv('NGROK_AUTH_TOKEN'))
           
           app = Flask(__name__)
           CORS(app)
@@ -66,16 +46,9 @@ jobs:
                       "error_type": type(err).__name__
                   }), 500
           
-          @app.route('/api', methods=['GET'])
-          def api_info():
-              return jsonify({
-                  "name": "Pyodide Python API",
-                  "description": "Execute Python code via HTTP"
-              }), 200
-          
           if __name__ == '__main__':
               import threading
-              server_thread = threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080, debug=False), daemon=True)
+              server_thread = threading.Thread(target=lambda: app.run(host='127.0.0.1', port=8080, debug=False), daemon=True)
               server_thread.start()
               
               time.sleep(2)
@@ -93,4 +66,4 @@ jobs:
                   ngrok.kill()
           EOF
           
-          python api_server.py
+          NGROK_AUTH_TOKEN=${{ secrets.NGROK_AUTH_TOKEN }} python api_server.py
