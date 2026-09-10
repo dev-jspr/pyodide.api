@@ -1,0 +1,86 @@
+name: Python API Server
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  run-api-server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask flask-cors
+      
+      - name: Create Flask API Server
+        run: |
+          cat > api_server.py << 'EOF'
+          from flask import Flask, request, jsonify
+          from flask_cors import CORS
+          import json
+          
+          app = Flask(__name__)
+          CORS(app)
+          
+          @app.route('/', methods=['POST'])
+          def execute_code():
+              try:
+                  data = request.get_json()
+                  code = data.get('code')
+                  
+                  if not code:
+                      return jsonify({"error": "No 'code' field provided"}), 400
+                  
+                  output_buffer = []
+                  namespace = {
+                      'print': lambda *args, **kwargs: output_buffer.append(' '.join(map(str, args))),
+                      '__builtins__': __builtins__
+                  }
+                  
+                  exec(code, namespace)
+                  output = '\n'.join(output_buffer) if output_buffer else ''
+                  
+                  return jsonify({
+                      "success": True,
+                      "output": output,
+                      "code": code
+                  }), 200
+              
+              except Exception as err:
+                  return jsonify({
+                      "success": False,
+                      "error": str(err),
+                      "error_type": type(err).__name__
+                  }), 500
+          
+          @app.route('/api', methods=['GET'])
+          def api_info():
+              return jsonify({
+                  "name": "Python API",
+                  "description": "Execute Python code via HTTP",
+                  "usage": {"method": "POST", "body": {"code": "print('Hello')"}}
+              }), 200
+          
+          if __name__ == '__main__':
+              app.run(host='0.0.0.0', port=8080)
+          EOF
+      
+      - name: Start API Server
+        run: python api_server.py &
+      
+      - name: Keep workflow alive
+        run: |
+          echo "API Server running!"
+          while true; do sleep 300; done
